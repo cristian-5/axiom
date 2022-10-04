@@ -2,7 +2,8 @@
 import {
 	Token, Type, TypeNames, BasicType, AST, ASTVisitor, Expression,
 	Block, Prefix, Infix, Postfix, Call, Product, Morphism,
-	Primary, Void, Identifier, Declaration, Alias, Environment, Kind, Multiple, VoidType, List, Assignment
+	Primary, Void, Identifier, Declaration, Alias, Environment, Variable, Kind,
+	Multiple, VoidType, List, Assignment, ListType, Category, TokenType
 } from "./tree.ts";
 
 const errors: { [code: string]: string } = {
@@ -12,6 +13,8 @@ const errors: { [code: string]: string } = {
 	"IIO": "invalid infix operation between basic types",
 	"IPR": "invalid prefix operation with basic type",
 	"IPO": "invalid postfix operation with basic type",
+	"VRD": "variable redeclaration",
+	"UID": "unknown identifier",
 	"UTE": "unknown type error",
 };
 
@@ -55,7 +58,12 @@ class Checker implements ASTVisitor {
 
 	tree: AST = new AST(); stack: Type[] = [];
 
-	variables = new Environment(); parameter = false;
+	variables = new Environment();
+	
+	// when parameter is true, we are defining a parameter
+	// when parameter is false, we are defining a variable
+	// when parameter is undefined, we are defining a global
+	parameter: boolean | undefined = undefined;
 
 	top(): Type | undefined { return this.stack[this.stack.length - 1]; }
 	pop(): Type | undefined { return this.stack.pop(); }
@@ -81,7 +89,6 @@ class Checker implements ASTVisitor {
 		throw error("UTE", p.bounds);
 	}
 	infix(i: Infix) {
-		// todo: check for assignment
 		i.lhs.accept!(this);
 		if (this.top() === undefined) throw error("UTE", bounds(i.operator));
 		const a = this.pop();
@@ -122,33 +129,71 @@ class Checker implements ASTVisitor {
 	block(b: Block) { }
 	morphism(m: Morphism) {
 		this.parameter = true;
+		// we must have a stack type for the morphism cast
+		// otherwise this stays a full template
+		
 		// whose responsibility is it to transform the parameters
 		// into a list of string identifiers? parser? checker?
 		this.parameter = false;
 	}
-	list(l: List) { }
-	primary(p: Primary) { }
-	void(v: Void) {
-		// tofix: where do we throw the error??? which bounds?
-		this.push(new VoidType());
+	list(l: List) {
+		if (l.expressions.length === 0) {
+			// tofix: casting from [()] to array of any on assignment
+			this.push(new ListType(new VoidType()));
+			return;
+		}
+		// todo: promote types to a common type
 	}
-	identifier(i: Identifier) { }
+	primary(p: Primary) {
+		switch (p.literal.type) {
+			case TokenType.boolean: this.push(new BasicType('bln')); break;
+			case TokenType.natural: this.push(new BasicType('nat')); break;
+			case TokenType.real: this.push(new BasicType('rea')); break;
+			case TokenType.character: this.push(new BasicType('chr')); break;
+			case TokenType.string:
+				this.push(new ListType(new BasicType('chr')));
+			break;
+			default: throw error("UTE", bounds(p.literal));
+		}
+	}
+	void(v: Void) { this.push(new VoidType(v.o, v.c)); }
+	identifier(i: Identifier) {
+		const variable = this.variables.lookup(i.symbol.lexeme);
+		if (variable === undefined) throw error("UID", bounds(i.symbol));
+		this.push(variable.type()!);
+	}
 	declaration(d: Declaration) {
+		if (this.variables.lookup(d.id.symbol.lexeme) !== undefined)
+			throw error("VRD", bounds(d.id.symbol));
 		this.variables.declare(
 			d.id.symbol.lexeme,
-			this.parameter ? Kind.parameter : Kind.local
+			new Variable(this.parameter === undefined ? Kind.global : (
+				this.parameter ? Kind.parameter : Kind.local
+			), d.prototype)
 		);
 		// todo: is this a function declaration?
 		//       is this a lambda or a clojure?
 		//       should we create a new environment?
-		//       how do we do polymorphism with partials?
+		// todo: implement polymorphism at some point
 	}
-	alias(a: Alias) { }
-	multiple(m: Multiple) { }
+	alias(_a: Alias) { }
+	multiple(m: Multiple) {
+		let last: Type | undefined;
+		for (const e of m.expressions) {
+			e.accept!(this);
+			// discard all results except the last
+			last = this.pop()!;
+		}
+		if (last == undefined) throw error("UTE", m.bounds);
+		this.push(last);
+	}
 
 	check(ast: Expression[]) {
 		this.tree = new AST(); this.stack = [];
-		for (const expression of ast) expression.accept!(this);
+		for (const expression of ast) {
+			expression.accept!(this);
+			// todo: check if the result needs to be discarded
+		}
 		return this.tree;
 	}
 
