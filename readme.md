@@ -50,6 +50,21 @@ bubble :: [<T>] -> [<T>]
 bubble = A -> ƒ(A, [])
 ```
 
+// TODO: THIS DOES NOT WORK YET
+``` swift
+/// fill function, fills a list with values in a range
+fill :: (nat, nat, [nat]) -> [nat]
+fill = (s, e, A) -> s == e ? A : [s] + ƒ(s + 1, e, A)
+/// sieve of eratosthenes, prime numbers less than n
+/// time  complexity: O(T(n)) = O(n * (n + 1) / 2) ~ O(n^2)
+/// space complexity: O(T(n)) = O(n * (n + 1) / 2) ~ O(n^2)
+/// tail-call space complexity: O(n)
+sieve :: (nat, nat, [nat]) -> [nat]
+sieve = (n, i, P) -> i == # P ? P : ƒ(n, i + 1, P - [P[i]])
+sieve :: nat -> [nat]
+sieve = n -> ƒ(n, 2, fill(2, n - 1, []))
+```
+
 ## Extensions
 
 **Axiom** has been designed in `TypeScript` and aims to be extremely

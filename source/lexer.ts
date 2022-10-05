@@ -75,7 +75,7 @@ export const lex = (code: string): Token[] => {
 	const scan_operator = (o: string) => {
 		const add = () => token(TokenType.operator, parsed());
 		switch (o) {
-			case '&': case '|': match(o); add(); break;
+			case '&': case '|': case '~': match(o); add(); break;
 			case '<': match('='); add(); break;
 			case '=': match_any([ '=', '>' ]); add(); break;
 			case ':':
@@ -83,7 +83,6 @@ export const lex = (code: string): Token[] => {
 				break;
 			case '!': case '>': match('='); add(); break;
 			case '-': match('>'); add(); break;
-			case '~': match('~'); add(); break;
 			case '/': scan_comment(); break;
 			default: token(TokenType.operator, cursor(1)); break;
 		}

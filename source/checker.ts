@@ -13,6 +13,7 @@ const errors: { [code: string]: string } = {
 	"IIO": "invalid infix operation between basic types",
 	"IPR": "invalid prefix operation with basic type",
 	"IPO": "invalid postfix operation with basic type",
+	"NAT": "non matching assignment types",
 	"VRD": "variable redeclaration",
 	"UID": "unknown identifier",
 	"UTE": "unknown type error",
@@ -70,20 +71,27 @@ class Checker implements ASTVisitor {
 	push(type: Type) { this.stack.push(type); }
 
 	assignment(a: Assignment) {
-		
+		// assignments are not propagated
+		a.rhs.accept!(this);
+		const id = a.lhs as Identifier;
+		const variable = this.variables.lookup(id.symbol.lexeme);
+		if (variable === undefined) throw error("UID", bounds(id.symbol));
+		a.type = this.pop();
+		if (a.type && !variable.types[0].matches(a.type))
+			throw error("NAT", bounds(id.symbol));
 	}
 	prefix(p: Prefix) {
 		p.expression.accept!(this);
-		const t = this.top();
-		if (t === undefined) throw error("UTE", bounds(p.operator));
+		p.type = this.top(); // assuming the prifix does not change the type
+		if (p.type === undefined) throw error("UTE", bounds(p.operator));
 		// operator between omoegeneous basic types
-		if (t instanceof BasicType) {
-			const pt = $((t as BasicType).name);
+		if (p.type instanceof BasicType) {
+			const pt = $((p.type as BasicType).name);
 			if (!(p.operator.lexeme in prefix_basic))
 				throw error("UPR", bounds(p.operator));
 			if (prefix_basic[p.operator.lexeme] % pt !== 0)
 				throw error("IPR", p.bounds);
-			this.push(t);
+			this.push(p.type);
 		}
 		// todo: operation between high-order types
 		throw error("UTE", p.bounds);
@@ -103,23 +111,23 @@ class Checker implements ASTVisitor {
 				throw error("UIO", bounds(i.operator));
 			if (infix_basic[i.operator.lexeme] % (pa * pb) !== 0)
 				throw error("IIO", i.bounds);
-			this.push(pa > pb ? a : b);
+			this.push(i.type = pa > pb ? a : b);
 		}
 		// todo: operation between high-order types
 		throw error("UTE", i.bounds);
 	}
 	postfix(p: Postfix) {
 		p.expression.accept!(this);
-		const t = this.top();
-		if (t === undefined) throw error("UTE", bounds(p.operator));
+		p.type = this.top(); // assuming the postfix does not change the type
+		if (p.type === undefined) throw error("UTE", bounds(p.operator));
 		// operator between omoegeneous basic types
-		if (t instanceof BasicType) {
-			const pt = $((t as BasicType).name);
+		if (p.type instanceof BasicType) {
+			const pt = $((p.type as BasicType).name);
 			if (!(p.operator.lexeme in postfix_basic))
 				throw error("UPO", bounds(p.operator));
 			if (postfix_basic[p.operator.lexeme] % pt !== 0)
 				throw error("IPO", p.bounds);
-			this.push(t);
+			this.push(p.type);
 		}
 		// todo: operation between high-order types
 		throw error("UTE", p.bounds);
@@ -144,32 +152,38 @@ class Checker implements ASTVisitor {
 		}
 		// todo: promote types to a common type
 	}
-	primary(p: Primary) {
+	primary(p: Primary) {9
 		switch (p.literal.type) {
-			case TokenType.boolean: this.push(new BasicType('bln')); break;
-			case TokenType.natural: this.push(new BasicType('nat')); break;
-			case TokenType.real: this.push(new BasicType('rea')); break;
-			case TokenType.character: this.push(new BasicType('chr')); break;
+			case TokenType.boolean: p.type = new BasicType("bln"); break;
+			case TokenType.natural: p.type = new BasicType('nat'); break;
+			case TokenType.real: p.type = new BasicType('rea'); break;
+			case TokenType.character: p.type = new BasicType('chr'); break;
 			case TokenType.string:
-				this.push(new ListType(new BasicType('chr')));
+				p.type = new ListType(new BasicType('chr'));
 			break;
 			default: throw error("UTE", bounds(p.literal));
 		}
+		this.push(p.type!);
 	}
-	void(v: Void) { this.push(new VoidType(v.o, v.c)); }
+	void(v: Void) {
+		v.type = new VoidType(v.o, v.c);
+		this.push(v.type);
+	}
 	identifier(i: Identifier) {
+		// if this is in a morphism, the type has been applied
 		const variable = this.variables.lookup(i.symbol.lexeme);
 		if (variable === undefined) throw error("UID", bounds(i.symbol));
-		this.push(variable.type()!);
+		this.push(i.type = variable.type()!);
 	}
 	declaration(d: Declaration) {
+		// declarations are not propagated
 		if (this.variables.lookup(d.id.symbol.lexeme) !== undefined)
 			throw error("VRD", bounds(d.id.symbol));
 		this.variables.declare(
 			d.id.symbol.lexeme,
 			new Variable(this.parameter === undefined ? Kind.global : (
 				this.parameter ? Kind.parameter : Kind.local
-			), d.prototype)
+			), d.type!)
 		);
 		// todo: is this a function declaration?
 		//       is this a lambda or a clojure?
@@ -185,7 +199,7 @@ class Checker implements ASTVisitor {
 			last = this.pop()!;
 		}
 		if (last == undefined) throw error("UTE", m.bounds);
-		this.push(last);
+		this.push(m.type = last);
 	}
 
 	check(ast: Expression[]) {
@@ -193,6 +207,7 @@ class Checker implements ASTVisitor {
 		for (const expression of ast) {
 			expression.accept!(this);
 			// todo: check if the result needs to be discarded
+			this.tree.push(expression);
 		}
 		return this.tree;
 	}

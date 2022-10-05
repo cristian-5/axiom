@@ -13,7 +13,7 @@ export type Token = { type: TokenType, lexeme: string, position: number };
 // ==== EXPRESSIONS ============================================================
 
 export class Expression {
-	start = 0; end = 0;
+	start = 0; end = 0; type?: Type = undefined;
 	get bounds() { return [ this.start, this.end ]; }
 	public accept?(visitor: ASTVisitor): void;
 }
@@ -176,25 +176,25 @@ export class Identifier extends Expression {
 }
 
 export class Declaration extends Expression {
-	id: Identifier; prototype: Type; expression?: Expression;
-	constructor(id: Identifier, prototype: Type, expression?: Expression) {
+	id: Identifier; expression?: Expression;
+	constructor(id: Identifier, type: Type, expression?: Expression) {
 		super();
 		this.id = id;
 		this.expression = expression;
-		this.prototype = prototype;
+		this.type = type;
 		this.start = id.start;
-		this.end = (expression || prototype)!.end;
+		this.end = (expression || type)!.end;
 	}
 }
 
 export class Alias extends Expression {
-	id: Identifier; prototype: Type;
-	constructor(id: Identifier, prototype: Type) {
+	id: Identifier;
+	constructor(id: Identifier, type: Type) {
 		super();
 		this.id = id;
-		this.prototype = prototype;
+		this.type = type;
 		this.start = id.start;
-		this.end = prototype.end;
+		this.end = type.end;
 	}
 }
 
@@ -334,11 +334,16 @@ export class BasicType implements Type {
 	readonly category = Category.basic;
 	readonly name: string;
 	get bounds() { return [ this.start, this.end ]; }
-	constructor(token: Token, alias?: string) {
+	constructor(token: Token | string, alias?: string) {
 		if (alias !== undefined) this.name = alias;
-		else this.name = token.lexeme;
-		this.start = token.position;
-		this.end = token.position + token.lexeme.length;
+		else if (typeof token === 'string') {
+			this.name = token;
+			this.start = this.end = 0;
+		} else {
+			this.name = token.lexeme;
+			this.start = token.position;
+			this.end = token.position + token.lexeme.length;
+		}
 	}
 	matches(other: Type): boolean {
 		if (other.category !== Category.basic) return false;
@@ -355,10 +360,15 @@ export class GenericType implements Type {
 	readonly category = Category.generic;
 	readonly name: string;
 	get bounds() { return [ this.start, this.end ]; }
-	constructor(token: Token) {
-		this.name = token.lexeme;
-		this.start = token.position;
-		this.end = token.position + token.lexeme.length;
+	constructor(token: Token | string) {
+		if (typeof token === 'string') {
+			this.name = token;
+			this.start = this.end = 0;
+		} else {
+			this.name = token.lexeme;
+			this.start = token.position;
+			this.end = token.position + token.lexeme.length;
+		}
 	}
 	matches(other: Type): boolean {
 		return other.category === Category.generic &&
@@ -394,7 +404,10 @@ export class VoidType implements Type {
 	start = 0; end = 0;
 	readonly category = Category.void;
 	get bounds() { return [ this.start, this.end ]; }
-	constructor() { }
+	constructor(s?: Token, e?: Token) {
+		if (s !== undefined) this.start = s.position;
+		if (e !== undefined) this.end = e.position + e.lexeme.length;
+	}
 	matches(other: Type): boolean {
 		return other.category === Category.void;
 	}
@@ -406,23 +419,43 @@ export class VoidType implements Type {
 
 export enum Kind { local, global, parameter }
 
+export class Variable {
+	kind: Kind;
+	types: Type[] = [];
+	assigned = false;
+	morphism = false;
+	constructor(kind: Kind, type: Type) {
+		this.kind = kind;
+		this.types.push(type);
+	}
+	type(arity?: number): Type | undefined {
+		if (arity === undefined) return this.types[0];
+		for (const type of this.types) {
+			if (type.category === Category.morphism) {
+				const morphism = type as MorphismType;
+				//if (morphism.arity == arity) return morphism;
+			}
+		}
+	}
+}
+
 export class Environment {
 
 	upper: Environment | undefined;
-	variables: { [name: string]: Kind } = { };
+	variables: { [name: string]: Variable } = { };
 
 	constructor(upper?: Environment) {
 		this.upper = upper;
 	}
 
-	lookup(name: string): Kind | undefined {
+	lookup(name: string): Variable | undefined {
 		if (name in this.variables) return this.variables[name];
 		if (this.upper !== undefined) return this.upper.lookup(name);
 		return undefined;
 	}
 
-	declare(name: string, kind: Kind) {
-		this.variables[name] = kind;
+	declare(name: string, data: Variable) {
+		this.variables[name] = data;
 	}
 
 }
@@ -449,8 +482,11 @@ export interface ASTVisitor {
 
 export class AST {
 
-	// warnings: string[];
-	// ast: Statement[];
+	warnings: string[] = [];
+	ast: Expression[] = [];
+
+	push(expression: Expression) { this.ast.push(expression); }
+	warn(message: string) { this.warnings.push(message); }
 
 }
 

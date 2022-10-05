@@ -358,12 +358,11 @@ export const parse = (tokens: Token[]): Expression[] => {
 				e = new Infix(e, prev(), factor());
 			return e;
 		};
-		// factor = power { ( '/' | '*' | '%' | '&' | '$' ) power }
+		// factor = power { ( '/' | '*' | '%' | '&' | '$', '.' ) power }
 		const factor = (): Expression => {
 			let e: Expression = power();
-			while (match(TokenType.operator, [
-				'/', '*', '%', '&', '$', '<§', '§>', '*>', '<*'
-			])) e = new Infix(e, prev(), power());
+			while (match(TokenType.operator, ['/', '*', '%', '&', '$', '.']))
+				e = new Infix(e, prev(), power());
 			return e;
 		};
 		// power = postfix { '^' postfix }
